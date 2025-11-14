@@ -103,6 +103,8 @@ def add_pengeluaran_ke_rencana(rencana_id: UUID, request: PengeluaranCreate) -> 
     # menangkap exception
     except AnggaranTerlampauiException as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except TanggalDiLuarDurasiException as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError as e: # error dari value objects
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
