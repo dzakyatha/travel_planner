@@ -1,0 +1,38 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Run Tests & Check Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      # Ambil kode dari repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Install 'uv'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      # Setup Python menggunakan uv
+      - name: Set up Python 3.10
+        run: uv python install 3.10
+
+      # Install dependensi dari pyproject.toml & uv.lock
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      # Menjalankan Pytest dengan Coverage Check
+      # --cov=. : Cek coverage di direktori saat ini
+      # --cov-fail-under=95 : Gagal jika coverage di bawah 95%
+      - name: Run Tests
+        run: |
+          uv run pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=95
