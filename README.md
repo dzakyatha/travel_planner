@@ -1,3 +1,5 @@
+[![CI Pipeline](https://github.com/dzakyatha/travel_planner/actions/workflows/main.yml/badge.svg)](https://github.com/dzakyatha/travel_planner/actions/workflows/main.yml)
+
 # Travel Planner API
 
 Repo ini berisikan API untuk perencanaan perjalanan yang diimplementasikan menggunakan **Domain-Driven Design (DDD)**. Repo ini dibuat untuk memenuhi **Tugas Besar** mata kuliah **II3160 - Teknologi Sistem Terintegrasi**. Proyek ini menggunakan **FastAPI** sebagai framework web dan menerapkan prinsip-prinsip DDD dengan **Value Objects**, **Entities**, dan **Aggregate Root**.
