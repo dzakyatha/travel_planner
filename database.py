@@ -28,3 +28,6 @@ def init_db():
 def get_session():
     with Session(engine) as session:
         yield session
+
+# Alias untuk konsistensi dengan router
+get_db = get_session
