@@ -1,15 +1,24 @@
 # skrip berisikan entity
 
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column
+from sqlalchemy import Column, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 from datetime import time, date
 from models.exception import AktivitasKonflikException
+import os
 
 if TYPE_CHECKING:
     from models.aggregate_root import RencanaPerjalanan
+
+# fungsi untuk menentukan tipe kolom JSON berdasarkan database yang digunakan
+def get_json_column():
+    db_url = os.getenv("DATABASE_URL", "sqlite:///./local_travel.db")
+    if db_url.startswith("postgresql"):
+        return Column(JSONB)
+    else:
+        return Column(JSON)
 
 # merepresentasikan satu kegiatan terjadwal dalam rencana perjalanan
 class Aktivitas(SQLModel, table=True):
@@ -18,8 +27,8 @@ class Aktivitas(SQLModel, table=True):
     waktuSelesai: time
     deskripsi: str
 
-    # JSONB untuk Value Object Lokasi
-    lokasi: Dict[str, Any] = Field(sa_column=Column(JSONB))
+    # JSON untuk Value Object Lokasi (compatible with SQLite and PostgreSQL)
+    lokasi: Dict[str, Any] = Field(sa_column=get_json_column())
 
     # Foreign Key ke HariPerjalanan
     hari_id: Optional[UUID] = Field(default=None, foreign_key="hariperjalanan.idHari")
@@ -62,7 +71,7 @@ class HariPerjalanan(SQLModel, table=True):
         for aktivitas in self.aktivitasList:
             if aktivitas.validasi_konflik(aktivitas_baru):
                 raise AktivitasKonflikException(
-                    f"Aktivitas '{aktivitas_baru.deskripsi}' tumpang tindih dengan '{aktivitas.deskripsi}'"
+                    f"Aktivitas '{aktivitas_baru.deskripsi}' bertabrakan dengan '{aktivitas.deskripsi}'"
                 )
 
         self.aktivitasList.append(aktivitas_baru)
