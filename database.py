@@ -8,8 +8,17 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local_travel.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Engine database
-engine = create_engine(DATABASE_URL, echo=False)
+# Engine database dengan konfigurasi yang tepat
+if DATABASE_URL.startswith("sqlite"):
+    # Untuk SQLite, gunakan sync driver dan check_same_thread=False
+    engine = create_engine(
+        DATABASE_URL, 
+        echo=False,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    # Untuk PostgreSQL atau database lainnya
+    engine = create_engine(DATABASE_URL, echo=False)
 
 # membuat semua tabel yang didefinisikan di SQLModel metadata
 def init_db():
