@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import uvicorn
-import router
+from router import router, auth_router
+from database import init_db
 
 app = FastAPI(
     title="API Perencanaan Perjalanan",
@@ -8,6 +9,12 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# init database saat startup
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+app.include_router(auth_router.router, prefix="/api/auth")
 app.include_router(router.router, prefix="/api")
 
 @app.get("/", tags=["Root"])
