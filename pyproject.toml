@@ -24,3 +24,36 @@ dev = [
     "pytest>=8.0.0",
     "httpx>=0.27.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--strict-markers"
+markers = [
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*_test.py",
+    "security/generate_key.py",
+    "security/hash.py",
+    "tests/utils.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "pass",
+    "@pytest.mark.skip",
+]
