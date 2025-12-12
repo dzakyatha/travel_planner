@@ -449,9 +449,9 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}  # Otomatis jika pakai Railway Postgres
 
 ### Domain & Akses
 
-- Railway akan generate public domain otomatis: `https://travel_planner.up.railway.app`
-- Akses Swagger UI: `https://travel_planner.up.railway.app/docs`
-- Akses ReDoc: `https://travel_planner.up.railway.app/redoc`
+- Railway akan generate public domain otomatis: `https://travelplanner-production-cada.up.railway.app`
+- Akses Swagger UI: `https://travelplanner-production-cada.up.railway.app/docs`
+- Akses ReDoc: `https://travelplanner-production-cada.up.railway.app/redoc`
 
 
 ## 👥 Author
