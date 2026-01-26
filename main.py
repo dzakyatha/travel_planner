@@ -20,7 +20,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.include_router(auth_router, prefix="/api/auth")
+#app.include_router(auth_router, prefix="/api/auth")
 app.include_router(router, prefix="/api")
 
 @app.get("/", tags=["Root"])
