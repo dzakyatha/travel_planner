@@ -8,6 +8,7 @@ from datetime import date
 
 # Model Domain
 from models.aggregate_root import RencanaPerjalanan
+from models.entity import Aktivitas, Pengeluaran, HariPerjalanan
 from models.exception import AnggaranTerlampauiException, AktivitasKonflikException, TanggalDiLuarDurasiException
 
 # API Schema
@@ -120,7 +121,9 @@ def update_rencana_anggaran(
     _ensure_ownership(rencana, current_user) # Hanya pemilik yang boleh mengakses
     
     try:
-        rencana.ubahAnggaran(data.total_anggaran)
+        rencana.anggaran_jumlah = data.anggaranBaru.jumlah
+        rencana.anggaran_mata_uang = data.anggaranBaru.mata_uang
+        
         session.add(rencana)
         session.commit()
         session.refresh(rencana)
@@ -140,7 +143,9 @@ def update_rencana_durasi(
     _ensure_ownership(rencana, current_user) # Hanya pemilik yang boleh mengakses
     
     try:
-        rencana.ubahDurasi(data.tanggal_mulai, data.tanggal_selesai)
+        rencana.durasi_mulai = data.durasiBaru.tanggalMulai
+        rencana.durasi_selesai = data.durasiBaru.tanggalSelesai
+        
         session.add(rencana)
         session.commit()
         session.refresh(rencana)
@@ -160,7 +165,7 @@ def add_hari_perjalanan(
     _ensure_ownership(rencana, current_user) # Hanya pemilik yang boleh mengakses
 
     try:
-        rencana.tambahHariPerjalanan(tanggal=data.tanggal, catatan=data.catatan)
+        rencana.tambahHariPerjalanan(tanggal=data.tanggal)
         
         session.add(rencana)
         session.commit()
@@ -183,18 +188,23 @@ def add_aktivitas(
 
     try:
         # Cari hari perjalanan yang sesuai
-        hari_target = next((h for h in rencana.list_hari_perjalanan if h.tanggal == tanggal), None)
+        hari_target = next((h for h in rencana.hariPerjalananList if h.tanggal == tanggal), None)
         if not hari_target:
             raise HTTPException(status_code=404, detail=f"Hari perjalanan tanggal {tanggal} tidak ditemukan")
-
-        rencana.tambahAktivitas(
-            hari_perjalanan=hari_target,
-            nama=data.nama,
-            waktu_mulai=data.waktu_mulai,
-            waktu_selesai=data.waktu_selesai,
-            lokasi=data.lokasi,
-            deskripsi=data.deskripsi
+        
+        # Use the actual schema field names and flatten Lokasi value object
+        aktivitas_baru = Aktivitas(
+            waktuMulai=data.waktuMulai,
+            waktuSelesai=data.waktuSelesai,
+            deskripsi=data.deskripsi,
+            lokasi_nama=data.lokasi.namaLokasi,
+            lokasi_alamat=data.lokasi.alamat,
+            lokasi_lat=data.lokasi.latitude,
+            lokasi_lon=data.lokasi.longitude
         )
+        
+        # Call tambahAktivitas on HariPerjalanan
+        hari_target.tambahAktivitas(aktivitas_baru)
         
         session.add(rencana)
         session.commit()
@@ -215,17 +225,21 @@ def add_pengeluaran(
     _ensure_ownership(rencana, current_user) # Hanya pemilik yang boleh mengakses
 
     try:
-        rencana.tambahPengeluaran(
+        # Create Pengeluaran object with flattened Uang value object
+        pengeluaran_baru = Pengeluaran(
             deskripsi=data.deskripsi,
-            jumlah=data.jumlah,
-            kategori=data.kategori
+            biaya_jumlah=data.biaya.jumlah,
+            biaya_mata_uang=data.biaya.mata_uang,
+            tanggalPengeluaran=data.tanggalPengeluaran
         )
+        rencana.tambahPengeluaran(pengeluaran_baru)
         
         session.add(rencana)
         session.commit()
         session.refresh(rencana)
         return rencana
-    except AnggaranTerlampauiException as e:
+    
+    except (AnggaranTerlampauiException, TanggalDiLuarDurasiException) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/{rencana_id}/hari/{tanggal}", response_model=RencanaPerjalanan)
