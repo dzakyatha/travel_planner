@@ -27,7 +27,7 @@ security = HTTPBearer()
 
 class AuthenticatedUser(BaseModel):
     id: str
-    email: str
+    email: Optional[str] = None
     role: str
 
 # fungsi untuk mengecek user saat ini berdasarkan token JWT
