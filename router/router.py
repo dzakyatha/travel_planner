@@ -70,12 +70,13 @@ def create_rencana_perjalanan(
 ):
     """Membuat rencana perjalanan baru"""
     # Menggunakan user_id dari token
-    baru = RencanaPerjalanan.create(
+    baru = RencanaPerjalanan(
         user_id=UUID(current_user.id),  # Konversi string ID dari token ke UUID
         nama=rencana_data.nama,
-        tanggal_mulai=rencana_data.tanggal_mulai,
-        tanggal_selesai=rencana_data.tanggal_selesai,
-        total_anggaran=rencana_data.total_anggaran
+        durasi_mulai=rencana_data.durasi.tanggalMulai,
+        durasi_selesai=rencana_data.durasi.tanggalSelesai,
+        anggaran_jumlah=rencana_data.anggaran.jumlah,
+        anggaran_mata_uang=rencana_data.anggaran.mata_uang
     )
     
     session.add(baru)

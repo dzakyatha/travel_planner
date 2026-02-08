@@ -10,6 +10,7 @@ from models.exception import TanggalDiLuarDurasiException, AnggaranTerlampauiExc
 # Kelas ini adalah satu-satunya titik masuk untuk memodifikasi state internal
 class RencanaPerjalanan(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID  # Field to track ownership
     nama: str
 
     # Flattening Value Object Durasi dan Anggaran
