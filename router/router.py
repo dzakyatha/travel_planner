@@ -8,8 +8,7 @@ from datetime import date, datetime
 
 # Model Domain
 from models.aggregate_root import RencanaPerjalanan
-from models.entity import Aktivitas, Pengeluaran, HariPerjalanan
-from models.value_objects import Lokasi
+from models.entity import Aktivitas, Pengeluaran, HariPerjalanan, Lokasi, TripImage, TripPickupPoint, TripInclude
 from models.exception import AnggaranTerlampauiException, AktivitasKonflikException, TanggalDiLuarDurasiException
 
 # API Schema
@@ -19,6 +18,9 @@ from schema import (
     PengeluaranCreate, 
     AktivitasCreate, 
     LokasiCreate,
+    TripImageCreate,
+    TripPickupPointCreate,
+    TripIncludeCreate,
     AnggaranUpdate, 
     DurasiUpdate
 )
@@ -205,6 +207,177 @@ def update_rencana_durasi(
         return rencana
     except TanggalDiLuarDurasiException as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ==========================================
+# TRIP IMAGE ENDPOINTS
+# ==========================================
+
+@router.post("/{rencana_id}/images", status_code=201, response_model=RencanaPerjalanan)
+def add_trip_image(
+    rencana_id: UUID,
+    data: TripImageCreate,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menambahkan gambar ke rencana perjalanan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    rencana.tambahTripImage(data.image_url)
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
+
+@router.get("/{rencana_id}/images", response_model=List[TripImage])
+def list_trip_images(
+    rencana_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Mengambil daftar gambar rencana perjalanan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    return rencana.trip_images
+
+@router.delete("/{rencana_id}/images/{image_id}", response_model=RencanaPerjalanan)
+def delete_trip_image(
+    rencana_id: UUID,
+    image_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menghapus gambar dari rencana perjalanan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    berhasil = rencana.hapusTripImage(image_id)
+    
+    if not berhasil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Gambar dengan ID {image_id} tidak ditemukan"
+        )
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
+
+# ==========================================
+# TRIP PICKUP POINT ENDPOINTS
+# ==========================================
+
+@router.post("/{rencana_id}/pickup-points", status_code=201, response_model=RencanaPerjalanan)
+def add_trip_pickup_point(
+    rencana_id: UUID,
+    data: TripPickupPointCreate,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menambahkan titik penjemputan ke rencana perjalanan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    rencana.tambahTripPickupPoint(data.lokasi_jemput)
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
+
+@router.get("/{rencana_id}/pickup-points", response_model=List[TripPickupPoint])
+def list_trip_pickup_points(
+    rencana_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Mengambil daftar titik penjemputan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    return rencana.trip_pickup_points
+
+@router.delete("/{rencana_id}/pickup-points/{pickup_id}", response_model=RencanaPerjalanan)
+def delete_trip_pickup_point(
+    rencana_id: UUID,
+    pickup_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menghapus titik penjemputan dari rencana perjalanan"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    berhasil = rencana.hapusTripPickupPoint(pickup_id)
+    
+    if not berhasil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Titik penjemputan dengan ID {pickup_id} tidak ditemukan"
+        )
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
+
+# ==========================================
+# TRIP INCLUDE ENDPOINTS
+# ==========================================
+
+@router.post("/{rencana_id}/includes", status_code=201, response_model=RencanaPerjalanan)
+def add_trip_include(
+    rencana_id: UUID,
+    data: TripIncludeCreate,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menambahkan item yang termasuk dalam paket"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    rencana.tambahTripInclude(data.item_include)
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
+
+@router.get("/{rencana_id}/includes", response_model=List[TripInclude])
+def list_trip_includes(
+    rencana_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Mengambil daftar item yang termasuk dalam paket"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    return rencana.trip_includes
+
+@router.delete("/{rencana_id}/includes/{include_id}", response_model=RencanaPerjalanan)
+def delete_trip_include(
+    rencana_id: UUID,
+    include_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Menghapus item yang termasuk dalam paket"""
+    rencana = _get_rencana(rencana_id, session)
+    _ensure_ownership(rencana, current_user)
+    
+    berhasil = rencana.hapusTripInclude(include_id)
+    
+    if not berhasil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Item include dengan ID {include_id} tidak ditemukan"
+        )
+    
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    return rencana
 
 # ==========================================
 # HARI PERJALANAN ENDPOINTS
