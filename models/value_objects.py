@@ -2,6 +2,11 @@
 
 from pydantic import BaseModel, model_validator, field_validator
 from datetime import date
+from sqlmodel import SQLModel, Field, Relationship
+from uuid import UUID, uuid4
+from typing import List, Optional
+from models.aggregate_root import RencanaPerjalanan
+from models.entity import Aktivitas
 
 # merepresentasikan nilai moneter
 class Uang(BaseModel):
@@ -29,8 +34,15 @@ class Durasi(BaseModel):
 
 # merepresentasikan lokasi perjalanan
 class Lokasi(BaseModel):
+    __table__ = "lokasi"  # nama tabel untuk SQLModel
+
+    id_lokasi: UUID = Field(default_factory=uuid4, primary_key=True)
     namaLokasi: str
     alamat: str
     latitude: float
     longitude: float
+
+    # Relasi
+    aktivitasList: List['Aktivitas'] = Relationship(back_populates="lokasi")
+    rencanaPerjalananList: List['RencanaPerjalanan'] = Relationship(back_populates="lokasi")
 

@@ -1,27 +1,34 @@
 # skrip berisikan Aggregate Root untuk Konteks Perencanaan Perjalanan
 
 from sqlmodel import SQLModel, Field, Relationship
-from typing import List
+from typing import List, Optional
 from uuid import UUID, uuid4
 from datetime import date
 from models.entity import HariPerjalanan, Pengeluaran
 from models.exception import TanggalDiLuarDurasiException, AnggaranTerlampauiException
+from models.value_objects import Lokasi
 
-# Kelas ini adalah satu-satunya titik masuk untuk memodifikasi state internal
+# merepresentasikan rencana perjalanan
 class RencanaPerjalanan(SQLModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID  # Field to track ownership
+    id_rencana: UUID = Field(default_factory=uuid4, primary_key=True)
+    id_user: UUID  # Field to track ownership
     nama: str
-
-    # Flattening Value Object Durasi dan Anggaran
+    deskripsi: Optional[str] = None
+    harga: float
     durasi_mulai: date
     durasi_selesai: date
-    anggaran_jumlah: float
-    anggaran_mata_uang: str = "IDR"
+    slot: int
+    slot_tersedia: bool
+    provinsi: str
+    negara: str
+    destination_type: str
+    jumlah_hari: int
+    jumlah_malam: int
+    createdAt: date
 
     # Relasi One-to-Many
     hariPerjalananList: List[HariPerjalanan] = Relationship(back_populates="rencana", sa_relationship_kwargs={"cascade": "all, delete"})
-    pengeluaranList: List[Pengeluaran] = Relationship(back_populates="rencana", sa_relationship_kwargs={"cascade": "all, delete"})
+    lokasi: Lokasi = Relationship(back_populates="rencanaPerjalananList")
 
     # method untuk Menghitung total pengeluaran dari list
     def totalPengeluaranSaatIni(self):

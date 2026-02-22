@@ -9,6 +9,8 @@ from datetime import time, date
 from models.exception import AktivitasKonflikException
 import os
 
+from models.value_objects import Lokasi
+
 if TYPE_CHECKING:
     from models.aggregate_root import RencanaPerjalanan
 
@@ -22,22 +24,24 @@ def get_json_column():
 
 # merepresentasikan satu kegiatan terjadwal dalam rencana perjalanan
 class Aktivitas(SQLModel, table=True):
-    idAktivitas: UUID = Field(default_factory=uuid4, primary_key=True)
-    waktuMulai: time
-    waktuSelesai: time
+    __tablename__ = "aktivitas"
+
+    id_aktivitas: UUID = Field(default_factory=uuid4, primary_key=True)
+    waktu_mulai: time
+    waktu_selesai: time
     deskripsi: str
 
-    # JSON untuk Value Object Lokasi (compatible with SQLite and PostgreSQL)
-    lokasi: Dict[str, Any] = Field(sa_column=get_json_column())
+    id_lokasi: UUID = Field(foreign_key="lokasi.id_lokasi")
+    lokasi: 'Lokasi' = Relationship(back_populates="aktivitasList")
 
     # Foreign Key ke HariPerjalanan
-    hari_id: Optional[UUID] = Field(default=None, foreign_key="hariperjalanan.idHari")
+    hari_id: Optional[UUID] = Field(default=None, foreign_key="hari_perjalanan.id_hari")
     hari: Optional['HariPerjalanan'] = Relationship(back_populates="aktivitasList")
 
     # cek apakah tumpang tindih dengan aktivitas lain
     def validasi_konflik(self, aktivitas_lain: 'Aktivitas'):
-        return (self.waktuMulai < aktivitas_lain.waktuSelesai and 
-        self.waktuSelesai > aktivitas_lain.waktuMulai)
+        return (self.waktu_mulai < aktivitas_lain.waktu_selesai and 
+        self.waktu_selesai > aktivitas_lain.waktu_mulai)
 
 # merepresentasikan pengeluaran uang dalam perjalanan
 class Pengeluaran(SQLModel, table=True):
@@ -55,8 +59,11 @@ class Pengeluaran(SQLModel, table=True):
 
 # merepresentasikan 1 hari dalam rencana perjalanan
 class HariPerjalanan(SQLModel, table=True):
-    idHari: UUID = Field(default_factory=uuid4, primary_key=True)
+    __tablename__ = "hari_perjalanan"
+
+    id_hari: UUID = Field(default_factory=uuid4, primary_key=True)
     tanggal: date
+    notes: Optional[str] = None
     
     # Foreign Key ke RencanaPerjalanan
     rencana_id: Optional[UUID] = Field(default=None, foreign_key="rencanaperjalanan.id")
