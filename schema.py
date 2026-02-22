@@ -61,6 +61,18 @@ class LokasiCreate(BaseModel):
     latitude: float
     longitude: float
 
+# untuk menambahkan gambar trip
+class TripImageCreate(BaseModel):
+    image_url: str
+
+# untuk menambahkan titik penjemputan
+class TripPickupPointCreate(BaseModel):
+    lokasi_jemput: str
+
+# untuk menambahkan item yang termasuk dalam paket
+class TripIncludeCreate(BaseModel):
+    item_include: str
+
 # untuk memperbarui anggaran RencanaPerjalanan
 class AnggaranUpdate(BaseModel):
     anggaranBaru: Uang
