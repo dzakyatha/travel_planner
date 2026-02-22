@@ -9,8 +9,6 @@ from datetime import time, date
 from models.exception import AktivitasKonflikException
 import os
 
-from models.value_objects import Lokasi
-
 if TYPE_CHECKING:
     from models.aggregate_root import RencanaPerjalanan
 
@@ -21,6 +19,53 @@ def get_json_column():
         return Column(JSONB)
     else:
         return Column(JSON)
+
+# merepresentasikan lokasi perjalanan (ENTITY)
+class Lokasi(SQLModel, table=True):
+    __tablename__ = "lokasi"
+
+    id_lokasi: UUID = Field(default_factory=uuid4, primary_key=True)
+    namaLokasi: str
+    alamat: str
+    latitude: float
+    longitude: float
+
+    # Relasi
+    aktivitasList: List['Aktivitas'] = Relationship(back_populates="lokasi")
+    rencanaPerjalananList: List['RencanaPerjalanan'] = Relationship(back_populates="lokasi")
+
+# merepresentasikan gambar perjalanan (ENTITY)
+class TripImage(SQLModel, table=True):
+    __tablename__ = "trip_image"
+
+    trip_image_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    image_url: str
+    
+    # Foreign Key ke RencanaPerjalanan
+    plan_id: UUID = Field(foreign_key="rencanaperjalanan.id_rencana")
+    plan: 'RencanaPerjalanan' = Relationship(back_populates="trip_images")
+
+# merepresentasikan titik penjemputan (ENTITY)
+class TripPickupPoint(SQLModel, table=True):
+    __tablename__ = "trip_pickup_point"
+
+    trip_pickup_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    lokasi_jemput: str
+    
+    # Foreign Key ke RencanaPerjalanan
+    plan_id: UUID = Field(foreign_key="rencanaperjalanan.id_rencana")
+    plan: 'RencanaPerjalanan' = Relationship(back_populates="trip_pickup_points")
+
+# merepresentasikan item yang termasuk dalam paket (ENTITY)
+class TripInclude(SQLModel, table=True):
+    __tablename__ = "trip_include"
+
+    trip_include_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    item_include: str
+    
+    # Foreign Key ke RencanaPerjalanan
+    plan_id: UUID = Field(foreign_key="rencanaperjalanan.id_rencana")
+    plan: 'RencanaPerjalanan' = Relationship(back_populates="trip_includes")
 
 # merepresentasikan satu kegiatan terjadwal dalam rencana perjalanan
 class Aktivitas(SQLModel, table=True):
@@ -54,7 +99,7 @@ class Pengeluaran(SQLModel, table=True):
     biaya_mata_uang: str = "IDR"
 
     # Foreign Key ke RencanaPerjalanan
-    rencana_id: Optional[UUID] = Field(default=None, foreign_key="rencanaperjalanan.id")
+    rencana_id: Optional[UUID] = Field(default=None, foreign_key="rencanaperjalanan.id_rencana")
     rencana: Optional['RencanaPerjalanan'] = Relationship(back_populates="pengeluaranList")
 
 # merepresentasikan 1 hari dalam rencana perjalanan
@@ -66,7 +111,7 @@ class HariPerjalanan(SQLModel, table=True):
     notes: Optional[str] = None
     
     # Foreign Key ke RencanaPerjalanan
-    rencana_id: Optional[UUID] = Field(default=None, foreign_key="rencanaperjalanan.id")
+    rencana_id: Optional[UUID] = Field(default=None, foreign_key="rencanaperjalanan.id_rencana")
     rencana: Optional['RencanaPerjalanan'] = Relationship(back_populates="hariPerjalananList")
 
     # Relasi ke Aktivitas

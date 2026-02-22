@@ -4,12 +4,13 @@ from sqlmodel import SQLModel, Field, Relationship
 from typing import List, Optional
 from uuid import UUID, uuid4
 from datetime import date
-from models.entity import HariPerjalanan, Pengeluaran
+from models.entity import HariPerjalanan, Pengeluaran, Lokasi, TripImage, TripPickupPoint, TripInclude
 from models.exception import TanggalDiLuarDurasiException, AnggaranTerlampauiException
-from models.value_objects import Lokasi
 
 # merepresentasikan rencana perjalanan
 class RencanaPerjalanan(SQLModel, table=True):
+    __tablename__ = "rencanaperjalanan"
+
     id_rencana: UUID = Field(default_factory=uuid4, primary_key=True)
     id_user: UUID  # Field to track ownership
     nama: str
@@ -18,7 +19,7 @@ class RencanaPerjalanan(SQLModel, table=True):
     durasi_mulai: date
     durasi_selesai: date
     slot: int
-    slot_tersedia: bool
+    slot_tersedia: bool = True
     provinsi: str
     negara: str
     destination_type: str
@@ -26,9 +27,16 @@ class RencanaPerjalanan(SQLModel, table=True):
     jumlah_malam: int
     createdAt: date
 
+    # Foreign Key untuk Lokasi
+    id_lokasi: Optional[UUID] = Field(default=None, foreign_key="lokasi.id_lokasi")
+    lokasi: Optional[Lokasi] = Relationship(back_populates="rencanaPerjalananList")
+
     # Relasi One-to-Many
     hariPerjalananList: List[HariPerjalanan] = Relationship(back_populates="rencana", sa_relationship_kwargs={"cascade": "all, delete"})
-    lokasi: Lokasi = Relationship(back_populates="rencanaPerjalananList")
+    pengeluaranList: List[Pengeluaran] = Relationship(back_populates="rencana", sa_relationship_kwargs={"cascade": "all, delete"})
+    trip_images: List[TripImage] = Relationship(back_populates="plan", sa_relationship_kwargs={"cascade": "all, delete"})
+    trip_pickup_points: List[TripPickupPoint] = Relationship(back_populates="plan", sa_relationship_kwargs={"cascade": "all, delete"})
+    trip_includes: List[TripInclude] = Relationship(back_populates="plan", sa_relationship_kwargs={"cascade": "all, delete"})
 
     # method untuk Menghitung total pengeluaran dari list
     def totalPengeluaranSaatIni(self):
@@ -55,7 +63,7 @@ class RencanaPerjalanan(SQLModel, table=True):
         total_setelah_tambah = self.totalPengeluaranSaatIni() + pengeluaran_baru.biaya_jumlah
 
         # cek apakah pengeluaran melebihi anggaran
-        if total_setelah_tambah > self.anggaran_jumlah:
+        if total_setelah_tambah > self.harga:
             raise AnggaranTerlampauiException(
                 f"Pengeluaran '{pengeluaran_baru.deskripsi}' sejumlah ({pengeluaran_baru.biaya_jumlah}) melebihi anggaran"
             )
@@ -68,14 +76,57 @@ class RencanaPerjalanan(SQLModel, table=True):
         
         self.pengeluaranList.append(pengeluaran_baru)
 
+    # method untuk menambahkan gambar ke rencana
+    def tambahTripImage(self, image_url: str) -> TripImage:
+        trip_image = TripImage(image_url=image_url)
+        self.trip_images.append(trip_image)
+        return trip_image
+
+    # method untuk menambahkan titik penjemputan ke rencana
+    def tambahTripPickupPoint(self, lokasi_jemput: str) -> TripPickupPoint:
+        pickup_point = TripPickupPoint(lokasi_jemput=lokasi_jemput)
+        self.trip_pickup_points.append(pickup_point)
+        return pickup_point
+
+    # method untuk menambahkan item yang termasuk dalam paket
+    def tambahTripInclude(self, item_include: str) -> TripInclude:
+        trip_include = TripInclude(item_include=item_include)
+        self.trip_includes.append(trip_include)
+        return trip_include
+
+    # method untuk menghapus gambar
+    def hapusTripImage(self, trip_image_id: UUID) -> bool:
+        trip_image = next((img for img in self.trip_images if img.trip_image_id == trip_image_id), None)
+        if trip_image:
+            self.trip_images.remove(trip_image)
+            return True
+        return False
+
+    # method untuk menghapus titik penjemputan
+    def hapusTripPickupPoint(self, trip_pickup_id: UUID) -> bool:
+        pickup_point = next((p for p in self.trip_pickup_points if p.trip_pickup_id == trip_pickup_id), None)
+        if pickup_point:
+            self.trip_pickup_points.remove(pickup_point)
+            return True
+        return False
+
+    # method untuk menghapus item include
+    def hapusTripInclude(self, trip_include_id: UUID) -> bool:
+        trip_include = next((inc for inc in self.trip_includes if inc.trip_include_id == trip_include_id), None)
+        if trip_include:
+            self.trip_includes.remove(trip_include)
+            return True
+        return False
+
     # method untuk mengelola anggaran rencana perjalanan
     def setAnggaran(self, jumlah_baru: float, mata_uang: str = "IDR"):
         # validasi anggaran baru tidak boleh lebih kecil dari pengeluaran saat ini
         if jumlah_baru < self.totalPengeluaranSaatIni():
-            raise ValueError("Anggaran baru tidak boleh lebih kecil dari total pengeluaran saat ini")
+            raise AnggaranTerlampauiException(
+                f"Anggaran baru ({jumlah_baru}) tidak boleh lebih kecil dari total pengeluaran saat ini ({self.totalPengeluaranSaatIni()})"
+            )
 
-        self.anggaran_jumlah = jumlah_baru
-        self.anggaran_mata_uang = mata_uang
+        self.harga = jumlah_baru
 
     # method untuk mengelola durasi rencana perjalanan
     def setDurasi(self, tanggal_mulai: date, tanggal_selesai: date):
@@ -86,9 +137,8 @@ class RencanaPerjalanan(SQLModel, table=True):
         ]
         
         if hari_di_luar_durasi:
-            tanggal_invalid = [hari.tanggal for hari in hari_di_luar_durasi]
             raise TanggalDiLuarDurasiException(
-                f"Tidak dapat mengubah durasi: terdapat hari perjalanan di luar durasi baru: {tanggal_invalid}"
+                f"Ada {len(hari_di_luar_durasi)} hari perjalanan yang berada di luar durasi baru"
             )
         
         # cek apakah ada pengeluaran yang berada di luar durasi baru
@@ -98,9 +148,8 @@ class RencanaPerjalanan(SQLModel, table=True):
         ]
         
         if pengeluaran_di_luar_durasi:
-            tanggal_invalid = [p.tanggalPengeluaran for p in pengeluaran_di_luar_durasi]
             raise TanggalDiLuarDurasiException(
-                f"Tidak dapat mengubah durasi: terdapat pengeluaran di luar durasi baru: {tanggal_invalid}"
+                f"Ada {len(pengeluaran_di_luar_durasi)} pengeluaran yang berada di luar durasi baru"
             )
         
         self.durasi_mulai = tanggal_mulai
@@ -135,7 +184,7 @@ class RencanaPerjalanan(SQLModel, table=True):
 
     # method untuk mendapatkan sisa anggaran
     def getSisaAnggaran(self) -> float:
-        return self.anggaran_jumlah - self.totalPengeluaranSaatIni()
+        return self.harga - self.totalPengeluaranSaatIni()
 
     # method untuk mendapatkan jumlah hari perjalanan
     def getJumlahHariPerjalanan(self) -> int:
