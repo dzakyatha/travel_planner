@@ -2,19 +2,44 @@
 
 from pydantic import BaseModel
 from datetime import date, time
-from models.value_objects import Uang, Durasi, Lokasi
+from uuid import UUID
+from typing import Optional
+
+# === Skema untuk Value Objects ===
+
+class Uang(BaseModel):
+    jumlah: float
+    mata_uang: str = "IDR"
+
+class Durasi(BaseModel):
+    tanggalMulai: date
+    tanggalSelesai: date
+
+class Lokasi(BaseModel):
+    namaLokasi: str
+    alamat: str
+    latitude: float
+    longitude: float
 
 # === Skema untuk Model ===
 
 # untuk membuat RencanaPerjalanan baru
 class RencanaPerjalananCreate(BaseModel):
     nama: str
+    deskripsi: Optional[str] = None
     durasi: Durasi
     anggaran: Uang
+    slot: int
+    provinsi: str
+    negara: str
+    destination_type: str
+    jumlah_hari: int
+    jumlah_malam: int
 
 # untuk menambahkan HariPerjalanan ke RencanaPerjalanan
 class HariPerjalananCreate(BaseModel):
     tanggal: date
+    notes: Optional[str] = None
 
 # untuk menambahkan Pengeluaran ke RencanaPerjalanan
 class PengeluaranCreate(BaseModel):
@@ -24,10 +49,17 @@ class PengeluaranCreate(BaseModel):
 
 # untuk menambahkan Aktivitas ke HariPerjalanan
 class AktivitasCreate(BaseModel):
-    waktuMulai: time
-    waktuSelesai: time
-    lokasi: Lokasi
+    waktu_mulai: time
+    waktu_selesai: time
     deskripsi: str
+    id_lokasi: UUID
+
+# untuk membuat Lokasi baru
+class LokasiCreate(BaseModel):
+    namaLokasi: str
+    alamat: str
+    latitude: float
+    longitude: float
 
 # untuk memperbarui anggaran RencanaPerjalanan
 class AnggaranUpdate(BaseModel):
