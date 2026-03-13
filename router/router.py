@@ -1,11 +1,12 @@
 # skrip berisikan Endpoint API untuk manajemen rencana perjalanan
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
 from uuid import UUID
-from typing import List
-from datetime import date, datetime
-
+from typing import List, Optional
+from datetime import date, datetime, time, timedelta
+from sqlmodel import select
 # Model Domain
 from models.aggregate_root import RencanaPerjalanan
 from models.entity import Aktivitas, Pengeluaran, HariPerjalanan, Lokasi, TripImage, TripPickupPoint, TripInclude
@@ -22,7 +23,9 @@ from schema import (
     TripPickupPointCreate,
     TripIncludeCreate,
     AnggaranUpdate, 
-    DurasiUpdate
+    DurasiUpdate,
+    TripUpdate,
+    BulkTripCreate
 )
 
 # Security (Stateless Auth)
@@ -143,6 +146,183 @@ def create_rencana_perjalanan(
     session.refresh(baru)
     return baru
 
+@router.post("/bulk-create", status_code=201)
+def bulk_create_trip(
+    trip_data: BulkTripCreate,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Membuat rencana perjalanan lengkap dengan gambar, poin penjemputan, dan item include dalam satu transaksi."""
+    try:
+        # 1. Validasi input dasar
+        if not trip_data.nama or trip_data.nama.strip() == "":
+            raise HTTPException(status_code=400, detail="Nama trip harus diisi")
+        
+        if trip_data.durasi_selesai < trip_data.durasi_mulai:
+            raise HTTPException(status_code=400, detail="Tanggal selesai tidak boleh lebih kecil dari tanggal mulai")
+        
+        # 2. Buat entitas RencanaPerjalanan utama
+        rencana = RencanaPerjalanan(
+            id_user=UUID(current_user.id),
+            nama=trip_data.nama.strip(),
+            deskripsi=trip_data.deskripsi.strip() if trip_data.deskripsi else None,
+            durasi_mulai=trip_data.durasi_mulai,
+            durasi_selesai=trip_data.durasi_selesai,
+            harga=trip_data.harga,
+            slot=trip_data.slot,
+            slot_tersedia=True,
+            provinsi=trip_data.provinsi.strip(),
+            negara=trip_data.negara.strip(),
+            destination_type=trip_data.destination_type.strip(),
+            jumlah_hari=trip_data.jumlah_hari,
+            jumlah_malam=trip_data.jumlah_malam,
+            createdAt=datetime.now().date(),
+            id_lokasi=trip_data.id_lokasi
+        )
+        
+        session.add(rencana)
+        session.flush()  # Flush untuk generate ID tanpa commit
+        
+        # 3. Tambahkan gambar-gambar
+        if trip_data.images and len(trip_data.images) > 0:
+            for image_url in trip_data.images:
+                if image_url and image_url.strip():
+                    trip_image = TripImage(
+                        image_url=image_url.strip(),
+                        plan_id=rencana.id_rencana
+                    )
+                    session.add(trip_image)
+        
+        # 4. Tambahkan poin penjemputan
+        if trip_data.pickup_points and len(trip_data.pickup_points) > 0:
+            for location in trip_data.pickup_points:
+                if location and location.strip():
+                    pickup_point = TripPickupPoint(
+                        lokasi_jemput=location.strip(),
+                        plan_id=rencana.id_rencana
+                    )
+                    session.add(pickup_point)
+        
+        # 5. Tambahkan item include
+        if trip_data.includes and len(trip_data.includes) > 0:
+            for item_name in trip_data.includes:
+                if item_name and item_name.strip():
+                    trip_include = TripInclude(
+                        item_include=item_name.strip(),
+                        plan_id=rencana.id_rencana
+                    )
+                    session.add(trip_include)
+        
+        # 6. Tambahkan data trip planner (hari_perjalanan, aktivitas, lokasi)
+        if trip_data.trip_planner:
+            location_cache = {}
+
+            def _parse_start_time(raw_text: Optional[str]) -> time:
+                """Terima 1 input waktu; jika user kirim range, ambil bagian awal saja."""
+                if not raw_text:
+                    return time(hour=8, minute=0)
+
+                text = str(raw_text).strip()
+                # dukung input lama: "06.00-07.00" / "06:00-07:00"
+                start_part = text.split('-')[0].strip()
+                normalized = start_part.replace('.', ':')
+                try:
+                    return datetime.strptime(normalized, "%H:%M").time()
+                except Exception:
+                    return time(hour=8, minute=0)
+
+            def _parse_duration(raw_val: Optional[str]) -> int:
+                if raw_val is None:
+                    return 0
+                try:
+                    return max(0, int(float(str(raw_val).strip())))
+                except Exception:
+                    return 0
+
+            for day_key, activities in trip_data.trip_planner.items():
+                try:
+                    day_num = int(day_key)
+                except Exception:
+                    continue
+
+                if day_num < 1:
+                    continue
+
+                tanggal_hari = trip_data.durasi_mulai + timedelta(days=day_num - 1)
+
+                # Susun notes dari aktivitas pertama pada hari tsb jika ada
+                notes = None
+                if activities and len(activities) > 0:
+                    first_desc = (activities[0].activity or '').strip()
+                    notes = first_desc if first_desc else f"Hari ke-{day_num}"
+
+                hari = HariPerjalanan(
+                    tanggal=tanggal_hari,
+                    notes=notes,
+                    rencana_id=rencana.id_rencana
+                )
+                session.add(hari)
+                session.flush()
+
+                for act in activities or []:
+                    deskripsi = (act.activity or '').strip()
+                    lokasi_nama = (act.location or '').strip()
+
+                    # skip row kosong
+                    if not deskripsi and not lokasi_nama and not (act.time or '').strip():
+                        continue
+
+                    if not deskripsi:
+                        deskripsi = "Aktivitas"
+                    if not lokasi_nama:
+                        lokasi_nama = "Lokasi"
+
+                    cache_key = lokasi_nama.lower()
+                    lokasi_id = location_cache.get(cache_key)
+                    if not lokasi_id:
+                        lokasi = Lokasi(
+                            namaLokasi=lokasi_nama,
+                            alamat=lokasi_nama,
+                            latitude=0.0,
+                            longitude=0.0
+                        )
+                        session.add(lokasi)
+                        session.flush()
+                        lokasi_id = lokasi.id_lokasi
+                        location_cache[cache_key] = lokasi_id
+
+                    aktivitas = Aktivitas(
+                        waktu_mulai=_parse_start_time(act.time),
+                        duration=_parse_duration(act.duration),
+                        deskripsi=deskripsi,
+                        id_lokasi=lokasi_id,
+                        hari_id=hari.id_hari
+                    )
+                    session.add(aktivitas)
+
+        # 7. Commit semua perubahan (transaksi atomik)
+        session.commit()
+        session.refresh(rencana)
+        
+        # 8. Return response sukses
+        return {
+            "success": True,
+            "trip_id": str(rencana.id_rencana),
+            "trip_name": rencana.nama,
+            "message": "Trip berhasil dibuat dengan foto, poin penjemputan, dan item include"
+        }
+        
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as e:
+        session.rollback()
+        print(f"Error creating trip: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal membuat trip: {str(e)}"
+        )
+
 @router.get("/", response_model=List[RencanaPerjalanan])
 def read_rencana_perjalanan_list(
     current_user: AuthenticatedUser = Depends(get_current_user),
@@ -151,9 +331,219 @@ def read_rencana_perjalanan_list(
     """Mengambil daftar rencana perjalanan milik user"""
     statement = select(RencanaPerjalanan).where(
         RencanaPerjalanan.id_user == UUID(current_user.id)
+    ).options(
+        selectinload(RencanaPerjalanan.trip_images)
     )
     results = session.exec(statement).all()
     return results
+
+
+@router.get("/all", response_model=List[RencanaPerjalanan])
+def read_all_rencana_perjalanan(
+    session: Session = Depends(get_session)
+):
+    """Mengambil daftar semua rencana perjalanan (tanpa filter user)."""
+    statement = select(RencanaPerjalanan).options(
+        selectinload(RencanaPerjalanan.trip_images)
+    )
+    results = session.exec(statement).all()
+    return results
+
+@router.get("/trips/latest")
+def get_latest_trip(
+    email: Optional[str] = Query(None, description="User email to filter trips"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    # Query latest trip for the current user
+    statement = select(RencanaPerjalanan).where(
+        RencanaPerjalanan.id_user == UUID(current_user.id)
+    ).options(
+        selectinload(RencanaPerjalanan.trip_images)
+    ).order_by(RencanaPerjalanan.createdAt.desc())
+    
+    results = session.exec(statement).all()
+    
+    if not results:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No trips found for this user"
+        )
+    
+    latest = results[0]
+    
+    # Get first image URL if available
+    image_url = latest.trip_images[0].image_url if latest.trip_images else None
+    
+    # Return in format expected by frontend
+    return {
+        "trip_id": str(latest.id_rencana),
+        "trip_name": latest.nama,
+        "start_date": str(latest.durasi_mulai) if latest.durasi_mulai else None,
+        "startDate": str(latest.durasi_mulai) if latest.durasi_mulai else None,
+        "endDate": str(latest.durasi_selesai) if latest.durasi_selesai else None,
+        "price": float(latest.harga) if latest.harga else 0.0,
+        "location": latest.provinsi or "",
+        "destination_type": latest.destination_type or "",
+        "status": "Upcoming",  # Default status
+        "created_at": str(latest.createdAt) if latest.createdAt else None,
+        "id_rencana": str(latest.id_rencana),
+        "nama": latest.nama,
+        "deskripsi": latest.deskripsi,
+        "harga": float(latest.harga) if latest.harga else 0.0,
+        "provinsi": latest.provinsi,
+        "negara": latest.negara,
+        "jumlah_hari": latest.jumlah_hari,
+        "jumlah_malam": latest.jumlah_malam,
+        "slot": latest.slot,
+        "slot_tersedia": latest.slot_tersedia,
+        "image_url": image_url,
+    }
+
+
+@router.get("/trips/all")
+def get_all_trips(
+    session: Session = Depends(get_session)
+):
+    statement = select(RencanaPerjalanan).options(
+        selectinload(RencanaPerjalanan.trip_images)
+    )
+    results = session.exec(statement).all()
+
+    mapped = []
+    for r in results:
+        # Get first image URL if available
+        image_url = r.trip_images[0].image_url if r.trip_images else None
+        
+        mapped.append({
+            "trip_id": str(r.id_rencana),
+            "trip_name": r.nama,
+            "start_date": str(r.durasi_mulai) if r.durasi_mulai else None,
+            "startDate": str(r.durasi_mulai) if r.durasi_mulai else None,
+            "endDate": str(r.durasi_selesai) if r.durasi_selesai else None,
+            "price": float(r.harga) if r.harga else 0.0,
+            "location": r.provinsi or "",
+            "destination_type": r.destination_type or "",
+            "status": "Upcoming",
+            "created_at": str(r.createdAt) if r.createdAt else None,
+            "id_rencana": str(r.id_rencana),
+            "nama": r.nama,
+            "deskripsi": r.deskripsi,
+            "harga": float(r.harga) if r.harga else 0.0,
+            "provinsi": r.provinsi,
+            "negara": r.negara,
+            "jumlah_hari": r.jumlah_hari,
+            "jumlah_malam": r.jumlah_malam,
+            "slot": r.slot,
+            "slot_tersedia": r.slot_tersedia,
+            "image_url": image_url,
+        })
+
+    return mapped
+
+
+@router.get("/trips/{trip_id}")
+def get_trip_detail(
+    trip_id: UUID,
+    session: Session = Depends(get_session)
+):
+    try:
+        # Use select with eager loading to get all relationships
+        stmt = (
+            select(RencanaPerjalanan)
+            .where(RencanaPerjalanan.id_rencana == trip_id)
+            .options(
+                selectinload(RencanaPerjalanan.trip_images),
+                selectinload(RencanaPerjalanan.trip_pickup_points),
+                selectinload(RencanaPerjalanan.trip_includes),
+                selectinload(RencanaPerjalanan.hariPerjalananList).selectinload(HariPerjalanan.aktivitasList).selectinload(Aktivitas.lokasi)
+            )
+        )
+        result = session.exec(stmt).first()
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Trip dengan ID {trip_id} tidak ditemukan"
+            )
+        
+        rencana = result
+        
+        # Map images from trip_images relationship
+        images = [img.image_url for img in rencana.trip_images] if rencana.trip_images else []
+        
+        # Map pickup points from trip_pickup_points relationship
+        pickup_points = []
+        for point in rencana.trip_pickup_points or []:
+            pickup_points.append({
+                "id": str(point.trip_pickup_id),
+                "location": point.lokasi_jemput,
+                "price": ""  # Price is not stored in the model currently
+            })
+        
+        # Map includes from trip_includes relationship
+        includes = [inc.item_include for inc in rencana.trip_includes] if rencana.trip_includes else []
+        
+        # Map rundowns from hariPerjalananList with activities
+        rundowns = {}
+        for hari in rencana.hariPerjalananList or []:
+            day_number = (hari.tanggal - rencana.durasi_mulai).days + 1
+            activities = []
+            for act in hari.aktivitasList or []:
+                activities.append({
+                    "time": str(act.waktu_mulai) if act.waktu_mulai else "",
+                    "duration": act.duration if act.duration is not None else 0,
+                    "activity": act.deskripsi or "",
+                    "location": act.lokasi.namaLokasi if act.lokasi else ""
+                })
+            if activities:
+                rundowns[str(day_number)] = activities
+        
+        # Return complete trip data with relationships
+        return {
+            "trip_id": str(rencana.id_rencana),
+            "tripId": str(rencana.id_rencana),
+            "trip_name": rencana.nama,
+            "name": rencana.nama,
+            "deskripsi": rencana.deskripsi or "",
+            "description": rencana.deskripsi or "",
+            "harga": float(rencana.harga) if rencana.harga else 0.0,
+            "price": float(rencana.harga) if rencana.harga else 0.0,
+            "provinsi": rencana.provinsi or "",
+            "negara": rencana.negara or "",
+            "location": {
+                "state": rencana.provinsi or "",
+                "country": rencana.negara or ""
+            },
+            "startDate": str(rencana.durasi_mulai) if rencana.durasi_mulai else None,
+            "endDate": str(rencana.durasi_selesai) if rencana.durasi_selesai else None,
+            "jumlah_hari": rencana.jumlah_hari or 0,
+            "jumlah_malam": rencana.jumlah_malam or 0,
+            "duration": {
+                "days": rencana.jumlah_hari or 0,
+                "nights": rencana.jumlah_malam or 0
+            },
+            "slot": rencana.slot or 0,
+            "slot_tersedia": rencana.slot_tersedia,
+            "destination_type": rencana.destination_type or "",
+            "destinationType": rencana.destination_type or "",
+            "created_at": str(rencana.createdAt) if rencana.createdAt else None,
+            "images": images,
+            "pickup_points": pickup_points,
+            "includes": includes,
+            "rundowns": rundowns
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_trip_detail: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading trip: {str(e)}"
+        )
+
 
 @router.get("/{rencana_id}", response_model=RencanaPerjalanan)
 def read_rencana_perjalanan_detail(
@@ -207,6 +597,236 @@ def update_rencana_durasi(
         return rencana
     except TanggalDiLuarDurasiException as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/trips/{trip_id}")
+def update_trip(
+    trip_id: UUID,
+    data: TripUpdate,
+    session: Session = Depends(get_session)
+):
+    try:
+        # Get the trip
+        rencana = session.get(RencanaPerjalanan, trip_id)
+        if not rencana:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Trip dengan ID {trip_id} tidak ditemukan"
+            )
+        
+        # Update only provided fields
+        if data.name is not None:
+            rencana.nama = data.name
+        if data.description is not None:
+            rencana.deskripsi = data.description
+        if data.price is not None:
+            rencana.harga = data.price
+        if data.provinsi is not None:
+            rencana.provinsi = data.provinsi
+        if data.country is not None:
+            rencana.negara = data.country
+        if data.slot is not None:
+            rencana.slot = data.slot
+        if data.days is not None:
+            rencana.jumlah_hari = data.days
+        if data.nights is not None:
+            rencana.jumlah_malam = data.nights
+        if data.destinationType is not None:
+            rencana.destination_type = data.destinationType
+        if data.durasi_mulai is not None:
+            rencana.durasi_mulai = data.durasi_mulai
+        if data.durasi_selesai is not None:
+            rencana.durasi_selesai = data.durasi_selesai
+
+        if rencana.durasi_selesai < rencana.durasi_mulai:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tanggal selesai tidak boleh lebih kecil dari tanggal mulai"
+            )
+
+        # Replace images when payload is provided
+        if data.images is not None:
+            existing_images = session.exec(
+                select(TripImage).where(TripImage.plan_id == trip_id)
+            ).all()
+            for img in existing_images:
+                session.delete(img)
+
+            for image_url in data.images:
+                if image_url and str(image_url).strip():
+                    session.add(
+                        TripImage(
+                            image_url=str(image_url).strip(),
+                            plan_id=rencana.id_rencana
+                        )
+                    )
+
+        # Replace pickup points when payload is provided
+        if data.pickup_points is not None:
+            existing_pickups = session.exec(
+                select(TripPickupPoint).where(TripPickupPoint.plan_id == trip_id)
+            ).all()
+            for pickup in existing_pickups:
+                session.delete(pickup)
+
+            for location in data.pickup_points:
+                if location and str(location).strip():
+                    session.add(
+                        TripPickupPoint(
+                            lokasi_jemput=str(location).strip(),
+                            plan_id=rencana.id_rencana
+                        )
+                    )
+
+        # Replace includes when payload is provided
+        if data.includes is not None:
+            existing_includes = session.exec(
+                select(TripInclude).where(TripInclude.plan_id == trip_id)
+            ).all()
+            for include in existing_includes:
+                session.delete(include)
+
+            for item_name in data.includes:
+                if item_name and str(item_name).strip():
+                    session.add(
+                        TripInclude(
+                            item_include=str(item_name).strip(),
+                            plan_id=rencana.id_rencana
+                        )
+                    )
+
+        # Replace trip planner data when payload is provided
+        if data.trip_planner is not None:
+            existing_days = session.exec(
+                select(HariPerjalanan).where(HariPerjalanan.rencana_id == trip_id)
+            ).all()
+            for day in existing_days:
+                session.delete(day)
+            session.flush()
+
+            location_cache = {}
+
+            def _parse_start_time(raw_text: Optional[str]) -> time:
+                if not raw_text:
+                    return time(hour=8, minute=0)
+
+                text = str(raw_text).strip()
+                start_part = text.split('-')[0].strip()
+                normalized = start_part.replace('.', ':')
+                try:
+                    return datetime.strptime(normalized, "%H:%M").time()
+                except Exception:
+                    return time(hour=8, minute=0)
+
+            def _parse_duration(raw_val: Optional[str]) -> int:
+                if raw_val is None:
+                    return 0
+                try:
+                    return max(0, int(float(str(raw_val).strip())))
+                except Exception:
+                    return 0
+
+            for day_key, activities in data.trip_planner.items():
+                try:
+                    day_num = int(day_key)
+                except Exception:
+                    continue
+
+                if day_num < 1:
+                    continue
+
+                tanggal_hari = rencana.durasi_mulai + timedelta(days=day_num - 1)
+
+                notes = None
+                if activities and len(activities) > 0:
+                    first_desc = (activities[0].get("activity") or "").strip()
+                    notes = first_desc if first_desc else f"Hari ke-{day_num}"
+
+                hari = HariPerjalanan(
+                    tanggal=tanggal_hari,
+                    notes=notes,
+                    rencana_id=rencana.id_rencana
+                )
+                session.add(hari)
+                session.flush()
+
+                for act in activities or []:
+                    if not isinstance(act, dict):
+                        continue
+
+                    deskripsi = (act.get("activity") or "").strip()
+                    lokasi_nama = (act.get("location") or "").strip()
+                    raw_time = (act.get("time") or "").strip()
+
+                    if not deskripsi and not lokasi_nama and not raw_time:
+                        continue
+
+                    if not deskripsi:
+                        deskripsi = "Aktivitas"
+                    if not lokasi_nama:
+                        lokasi_nama = "Lokasi"
+
+                    cache_key = lokasi_nama.lower()
+                    lokasi_id = location_cache.get(cache_key)
+                    if not lokasi_id:
+                        lokasi = Lokasi(
+                            namaLokasi=lokasi_nama,
+                            alamat=lokasi_nama,
+                            latitude=0.0,
+                            longitude=0.0
+                        )
+                        session.add(lokasi)
+                        session.flush()
+                        lokasi_id = lokasi.id_lokasi
+                        location_cache[cache_key] = lokasi_id
+
+                    session.add(
+                        Aktivitas(
+                            waktu_mulai=_parse_start_time(raw_time),
+                            duration=_parse_duration(act.get("duration")),
+                            deskripsi=deskripsi,
+                            id_lokasi=lokasi_id,
+                            hari_id=hari.id_hari
+                        )
+                    )
+        
+        # Commit changes
+        session.add(rencana)
+        session.commit()
+        session.refresh(rencana)
+        
+        # Return updated trip in frontend format
+        return {
+            "trip_id": str(rencana.id_rencana),
+            "tripId": str(rencana.id_rencana),
+            "name": rencana.nama,
+            "description": rencana.deskripsi or "",
+            "price": float(rencana.harga) if rencana.harga else 0.0,
+            "provinsi": rencana.provinsi or "",
+            "country": rencana.negara or "",
+            "location": {
+                "state": rencana.provinsi or "",
+                "country": rencana.negara or ""
+            },
+            "slot": rencana.slot or 0,
+            "duration": {
+                "days": rencana.jumlah_hari or 0,
+                "nights": rencana.jumlah_malam or 0
+            },
+            "destinationType": rencana.destination_type or "",
+            "startDate": str(rencana.durasi_mulai) if rencana.durasi_mulai else None,
+            "endDate": str(rencana.durasi_selesai) if rencana.durasi_selesai else None,
+            "success": True
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_trip: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating trip: {str(e)}"
+        )
 
 # ==========================================
 # TRIP IMAGE ENDPOINTS
@@ -286,6 +906,19 @@ def add_trip_pickup_point(
     session.commit()
     session.refresh(rencana)
     return rencana
+
+@router.get("/trip-pickup-points", response_model=List[TripPickupPoint])
+def get_pickup_points_by_plan_id(plan_id: UUID = Query(...), session: Session = Depends(get_session)):
+    stmt = select(TripPickupPoint).where(TripPickupPoint.plan_id == plan_id)
+    return session.exec(stmt).all()
+
+
+@router.get("/pickup_points", response_model=List[TripPickupPoint])
+def get_pickup_points_by_trip_id(trip_id: Optional[UUID] = Query(None), session: Session = Depends(get_session)):
+    if not trip_id:
+        return []
+    stmt = select(TripPickupPoint).where(TripPickupPoint.plan_id == trip_id)
+    return session.exec(stmt).all()
 
 @router.get("/{rencana_id}/pickup-points", response_model=List[TripPickupPoint])
 def list_trip_pickup_points(
@@ -466,7 +1099,7 @@ def add_aktivitas(
         # Buat aktivitas baru
         aktivitas_baru = Aktivitas(
             waktu_mulai=data.waktu_mulai,
-            waktu_selesai=data.waktu_selesai,
+            duration=data.duration,
             deskripsi=data.deskripsi,
             id_lokasi=data.id_lokasi
         )

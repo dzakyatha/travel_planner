@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 from datetime import date, time
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List, Dict
 
 # === Skema untuk Value Objects ===
 
@@ -50,7 +50,7 @@ class PengeluaranCreate(BaseModel):
 # untuk menambahkan Aktivitas ke HariPerjalanan
 class AktivitasCreate(BaseModel):
     waktu_mulai: time
-    waktu_selesai: time
+    duration: int
     deskripsi: str
     id_lokasi: UUID
 
@@ -80,6 +80,54 @@ class AnggaranUpdate(BaseModel):
 # untuk memperbarui durasi RencanaPerjalanan
 class DurasiUpdate(BaseModel):
     durasiBaru: Durasi
+
+# untuk memperbarui trip secara keseluruhan
+class TripUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[float] = None
+    provinsi: Optional[str] = None
+    country: Optional[str] = None
+    slot: Optional[int] = None
+    days: Optional[int] = None
+    nights: Optional[int] = None
+    destinationType: Optional[str] = None
+    durasi_mulai: Optional[date] = None
+    durasi_selesai: Optional[date] = None
+    images: Optional[List[str]] = None
+    includes: Optional[List[str]] = None
+    pickup_points: Optional[List[str]] = None
+    trip_planner: Optional[Dict[str, List[dict]]] = None
+
+
+class TripPlannerActivityCreate(BaseModel):
+    time: Optional[str] = None
+    duration: Optional[str] = None
+    activity: Optional[str] = None
+    location: Optional[str] = None
+
+# untuk bulk save trip dengan semua data terkait
+class BulkTripCreate(BaseModel):
+    """Schema untuk membuat trip lengkap dengan images, includes, dan pickup points dalam satu request"""
+    # Main trip data
+    nama: str
+    deskripsi: Optional[str] = None
+    harga: float
+    slot: int
+    provinsi: str
+    negara: str
+    destination_type: str
+    jumlah_hari: int
+    jumlah_malam: int
+    durasi_mulai: date
+    durasi_selesai: date
+    id_lokasi: Optional[UUID] = None
+    
+    # Related data (arrays)
+    images: List[str] = []  # list of image URLs
+    includes: List[str] = []  # list of include item names
+    pickup_points: List[str] = []  # list of pickup point locations
+    trip_planner: Dict[str, List[TripPlannerActivityCreate]] = {}
 
 # === Skema untuk Autentikasi ===
 

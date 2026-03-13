@@ -27,7 +27,7 @@ async def root():
     return {"message": "Selamat datang di API Perencanaan Perjalanan"}
 
 def main():
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8009)
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,7 @@ from sqlalchemy import Column, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from uuid import UUID, uuid4
-from datetime import time, date
+from datetime import time, date, datetime, timedelta
 from models.exception import AktivitasKonflikException
 import os
 
@@ -73,7 +73,7 @@ class Aktivitas(SQLModel, table=True):
 
     id_aktivitas: UUID = Field(default_factory=uuid4, primary_key=True)
     waktu_mulai: time
-    waktu_selesai: time
+    duration: int = 0
     deskripsi: str
 
     id_lokasi: UUID = Field(foreign_key="lokasi.id_lokasi")
@@ -85,8 +85,12 @@ class Aktivitas(SQLModel, table=True):
 
     # cek apakah tumpang tindih dengan aktivitas lain
     def validasi_konflik(self, aktivitas_lain: 'Aktivitas'):
-        return (self.waktu_mulai < aktivitas_lain.waktu_selesai and 
-        self.waktu_selesai > aktivitas_lain.waktu_mulai)
+        self_start = datetime.combine(date.today(), self.waktu_mulai)
+        self_end = self_start + timedelta(hours=max(0, self.duration or 0))
+        other_start = datetime.combine(date.today(), aktivitas_lain.waktu_mulai)
+        other_end = other_start + timedelta(hours=max(0, aktivitas_lain.duration or 0))
+
+        return self_start < other_end and self_end > other_start
 
 # merepresentasikan pengeluaran uang dalam perjalanan
 class Pengeluaran(SQLModel, table=True):
