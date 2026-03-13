@@ -12,7 +12,7 @@ class RencanaPerjalanan(SQLModel, table=True):
     __tablename__ = "rencanaperjalanan"
 
     id_rencana: UUID = Field(default_factory=uuid4, primary_key=True)
-    id_user: UUID  # Field to track ownership
+    id_user: str
     nama: str
     deskripsi: Optional[str] = None
     harga: float
@@ -25,7 +25,7 @@ class RencanaPerjalanan(SQLModel, table=True):
     destination_type: str
     jumlah_hari: int
     jumlah_malam: int
-    createdAt: date
+    created_at: date
 
     # Foreign Key untuk Lokasi
     id_lokasi: Optional[UUID] = Field(default=None, foreign_key="lokasi.id_lokasi")
