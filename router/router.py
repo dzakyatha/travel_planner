@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
+from sqlalchemy import update as sql_update
 from uuid import UUID
 from typing import List, Optional
 from datetime import date, datetime, time, timedelta
@@ -25,7 +26,8 @@ from schema import (
     AnggaranUpdate, 
     DurasiUpdate,
     TripUpdate,
-    BulkTripCreate
+    BulkTripCreate,
+    SlotReservationRequest
 )
 
 # Security (Stateless Auth)
@@ -64,6 +66,20 @@ def _ensure_ownership(rencana: RencanaPerjalanan, user: AuthenticatedUser):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Anda tidak memiliki izin untuk mengakses rencana ini"
         )
+
+
+def _recalculate_remaining_slots(rencana: RencanaPerjalanan, new_capacity: int) -> int:
+    booked = max((rencana.slot or 0) - (rencana.slot_tersedia or 0), 0)
+    return max(new_capacity - booked, 0)
+
+
+def _compute_available(slot_tersedia: Optional[int], slot: Optional[int]) -> bool:
+    # Availability is derived from remaining slots in rencanaperjalanan.
+    total_slot = int(slot or 0)
+    remaining_slot = int(slot_tersedia or 0)
+    if total_slot <= 0:
+        return False
+    return remaining_slot > 0
 
 # ==========================================
 # LOKASI ENDPOINTS
@@ -132,7 +148,7 @@ def create_rencana_perjalanan(
         durasi_selesai=rencana_data.durasi.tanggalSelesai,
         harga=rencana_data.anggaran.jumlah,
         slot=rencana_data.slot,
-        slot_tersedia=True,
+        slot_tersedia=max(rencana_data.slot, 0),
         provinsi=rencana_data.provinsi,
         negara=rencana_data.negara,
         destination_type=rencana_data.destination_type,
@@ -170,7 +186,7 @@ def bulk_create_trip(
             durasi_selesai=trip_data.durasi_selesai,
             harga=trip_data.harga,
             slot=trip_data.slot,
-            slot_tersedia=True,
+            slot_tersedia=max(trip_data.slot, 0),
             provinsi=trip_data.provinsi.strip(),
             negara=trip_data.negara.strip(),
             destination_type=trip_data.destination_type.strip(),
@@ -371,6 +387,7 @@ def get_latest_trip(
         )
     
     latest = results[0]
+    is_available = _compute_available(latest.slot_tersedia, latest.slot)
     
     # Get first image URL if available
     image_url = latest.trip_images[0].image_url if latest.trip_images else None
@@ -397,6 +414,9 @@ def get_latest_trip(
         "jumlah_malam": latest.jumlah_malam,
         "slot": latest.slot,
         "slot_tersedia": latest.slot_tersedia,
+        "slot_available": latest.slot_tersedia,
+        "available": is_available,
+        "is_available": is_available,
         "image_url": image_url,
     }
 
@@ -414,6 +434,7 @@ def get_all_trips(
     for r in results:
         # Get first image URL if available
         image_url = r.trip_images[0].image_url if r.trip_images else None
+        is_available = _compute_available(r.slot_tersedia, r.slot)
         
         mapped.append({
             "trip_id": str(r.id_rencana),
@@ -436,6 +457,9 @@ def get_all_trips(
             "jumlah_malam": r.jumlah_malam,
             "slot": r.slot,
             "slot_tersedia": r.slot_tersedia,
+            "slot_available": r.slot_tersedia,
+            "available": is_available,
+            "is_available": is_available,
             "image_url": image_url,
         })
 
@@ -468,6 +492,7 @@ def get_trip_detail(
             )
         
         rencana = result
+        is_available = _compute_available(rencana.slot_tersedia, rencana.slot)
         
         # Map images from trip_images relationship
         images = [img.image_url for img in rencana.trip_images] if rencana.trip_images else []
@@ -525,6 +550,9 @@ def get_trip_detail(
             },
             "slot": rencana.slot or 0,
             "slot_tersedia": rencana.slot_tersedia,
+            "slot_available": rencana.slot_tersedia,
+            "available": is_available,
+            "is_available": is_available,
             "destination_type": rencana.destination_type or "",
             "destinationType": rencana.destination_type or "",
             "created_at": str(rencana.createdAt) if rencana.createdAt else None,
@@ -625,6 +653,12 @@ def update_trip(
         if data.country is not None:
             rencana.negara = data.country
         if data.slot is not None:
+            if data.slot < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="slot tidak boleh negatif"
+                )
+            rencana.slot_tersedia = _recalculate_remaining_slots(rencana, data.slot)
             rencana.slot = data.slot
         if data.days is not None:
             rencana.jumlah_hari = data.days
@@ -643,22 +677,28 @@ def update_trip(
                 detail="Tanggal selesai tidak boleh lebih kecil dari tanggal mulai"
             )
 
-        # Replace images when payload is provided
+        # Add-only image update when payload is provided.
+        # Existing images are preserved; use dedicated DELETE endpoint to remove.
         if data.images is not None:
             existing_images = session.exec(
                 select(TripImage).where(TripImage.plan_id == trip_id)
             ).all()
-            for img in existing_images:
-                session.delete(img)
+            existing_urls = {
+                (img.image_url or "").strip()
+                for img in existing_images
+                if img.image_url
+            }
 
             for image_url in data.images:
-                if image_url and str(image_url).strip():
+                normalized_url = str(image_url).strip() if image_url is not None else ""
+                if normalized_url and normalized_url not in existing_urls:
                     session.add(
                         TripImage(
-                            image_url=str(image_url).strip(),
+                            image_url=normalized_url,
                             plan_id=rencana.id_rencana
                         )
                     )
+                    existing_urls.add(normalized_url)
 
         # Replace pickup points when payload is provided
         if data.pickup_points is not None:
@@ -827,6 +867,125 @@ def update_trip(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating trip: {str(e)}"
         )
+
+
+@router.post("/trips/{trip_id}/reserve-slots")
+def reserve_trip_slots(
+    trip_id: UUID,
+    payload: SlotReservationRequest,
+    session: Session = Depends(get_session)
+):
+    requested = payload.participant_count if payload and payload.participant_count else 1
+    if requested <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="participant_count harus lebih dari 0"
+        )
+
+    stmt = (
+        sql_update(RencanaPerjalanan)
+        .where(
+            RencanaPerjalanan.id_rencana == trip_id,
+            RencanaPerjalanan.slot_tersedia >= requested
+        )
+        .values(slot_tersedia=RencanaPerjalanan.slot_tersedia - requested)
+    )
+    result = session.exec(stmt)
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slot tidak tersedia untuk jumlah peserta yang diminta"
+        )
+
+    session.commit()
+    refreshed = session.get(RencanaPerjalanan, trip_id)
+    slot = int(refreshed.slot if refreshed and refreshed.slot is not None else 0)
+    slot_tersedia = int(refreshed.slot_tersedia if refreshed and refreshed.slot_tersedia is not None else 0)
+    is_available = _compute_available(slot_tersedia, slot)
+    return {
+        "success": True,
+        "trip_id": str(trip_id),
+        "slot": slot,
+        "slot_tersedia": slot_tersedia,
+        "slot_available": slot_tersedia,
+        "available": is_available,
+        "is_available": is_available
+    }
+
+
+@router.post("/trips/{trip_id}/release-slots")
+def release_trip_slots(
+    trip_id: UUID,
+    payload: SlotReservationRequest,
+    session: Session = Depends(get_session)
+):
+    released = payload.participant_count if payload and payload.participant_count else 1
+    if released <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="participant_count harus lebih dari 0"
+        )
+
+    rencana = session.get(RencanaPerjalanan, trip_id)
+    if not rencana:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trip dengan ID {trip_id} tidak ditemukan"
+        )
+
+    rencana.slot_tersedia = min((rencana.slot_tersedia or 0) + released, rencana.slot or 0)
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    is_available = _compute_available(rencana.slot_tersedia, rencana.slot)
+
+    return {
+        "success": True,
+        "trip_id": str(trip_id),
+        "slot": int(rencana.slot or 0),
+        "slot_tersedia": int(rencana.slot_tersedia or 0),
+        "slot_available": int(rencana.slot_tersedia or 0),
+        "available": is_available,
+        "is_available": is_available
+    }
+
+
+@router.post("/trips/{trip_id}/sync-slots")
+def sync_trip_slots(
+    trip_id: UUID,
+    payload: SlotReservationRequest,
+    session: Session = Depends(get_session)
+):
+    participant_count = payload.participant_count if payload and payload.participant_count is not None else 0
+    if participant_count < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="participant_count tidak boleh negatif"
+        )
+
+    rencana = session.get(RencanaPerjalanan, trip_id)
+    if not rencana:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trip dengan ID {trip_id} tidak ditemukan"
+        )
+
+    rencana.slot_tersedia = max((rencana.slot or 0) - participant_count, 0)
+    session.add(rencana)
+    session.commit()
+    session.refresh(rencana)
+    is_available = _compute_available(rencana.slot_tersedia, rencana.slot)
+
+    return {
+        "success": True,
+        "trip_id": str(trip_id),
+        "slot": int(rencana.slot or 0),
+        "participant_count": int(participant_count),
+        "slot_tersedia": int(rencana.slot_tersedia or 0),
+        "slot_available": int(rencana.slot_tersedia or 0),
+        "available": is_available,
+        "is_available": is_available
+    }
 
 # ==========================================
 # TRIP IMAGE ENDPOINTS

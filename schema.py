@@ -106,6 +106,10 @@ class TripPlannerActivityCreate(BaseModel):
     activity: Optional[str] = None
     location: Optional[str] = None
 
+
+class SlotReservationRequest(BaseModel):
+    participant_count: int = 1
+
 # untuk bulk save trip dengan semua data terkait
 class BulkTripCreate(BaseModel):
     """Schema untuk membuat trip lengkap dengan images, includes, dan pickup points dalam satu request"""

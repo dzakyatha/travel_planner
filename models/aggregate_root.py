@@ -12,20 +12,20 @@ class RencanaPerjalanan(SQLModel, table=True):
     __tablename__ = "rencanaperjalanan"
 
     id_rencana: UUID = Field(default_factory=uuid4, primary_key=True)
-    id_user: str
+    id_user: UUID
     nama: str
     deskripsi: Optional[str] = None
     harga: float
     durasi_mulai: date
     durasi_selesai: date
     slot: int
-    slot_tersedia: bool = True
+    slot_tersedia: int = 0
     provinsi: str
     negara: str
     destination_type: str
     jumlah_hari: int
     jumlah_malam: int
-    created_at: date
+    createdAt: date
 
     # Foreign Key untuk Lokasi
     id_lokasi: Optional[UUID] = Field(default=None, foreign_key="lokasi.id_lokasi")
