@@ -1,459 +1,282 @@
-[![CI Pipeline](https://github.com/dzakyatha/travel_planner/actions/workflows/main.yml/badge.svg)](https://github.com/dzakyatha/travel_planner/actions/workflows/main.yml)
-
 # Travel Planner API
 
-Repo ini berisikan API untuk perencanaan perjalanan yang diimplementasikan menggunakan **Domain-Driven Design (DDD)**. Repo ini dibuat untuk memenuhi **Tugas Besar** mata kuliah **II3160 - Teknologi Sistem Terintegrasi**. Proyek ini menggunakan **FastAPI** sebagai framework web dan menerapkan prinsip-prinsip DDD dengan **Value Objects**, **Entities**, dan **Aggregate Root**.
+Backend API for trip and travel-planning management built with **FastAPI** using a Domain-Driven Design (DDD) approach.
 
-## 📋 Fitur
+## Feature Summary
 
-- Membuat dan mengelola rencana perjalanan
-- Menambahkan hari dan aktivitas dalam rencana perjalanan
-- Mengelola anggaran dan pengeluaran rencana perjalanan
-- Validasi bisnis/invariants untuk menjaga integritas data
-- Autentikasi berbasis **JWT** dengan **OAuth2 Password Flow** (protected endpoints)
-- Database persistence menggunakan **SQLModel** (SQLite/PostgreSQL)
-- Continuous Integration dengan GitHub Actions
+- Trip CRUD operations
+- Bulk trip creation (main trip + images + pickup points + includes + daily rundown)
+- Participant slot management (reserve/release/sync)
+- Location, trip day, activity, expense, and trip statistics management
+- Domain rule validation (budget limit, date range checks, activity conflict checks)
+- SQLModel database persistence (SQLite/PostgreSQL)
+- CI pipeline via GitHub Actions
 
-## 🏗️ Arsitektur
+## Current Component Architecture
 
-Proyek ini mengimplementasikan **Domain-Driven Design (DDD)** dengan struktur:
+### API Layer
 
-### Value Objects
-- [`Uang`](models/value_objects.py) - Representasi nilai moneter dengan validasi
-- [`Durasi`](models/value_objects.py) - Rentang waktu perjalanan
-- [`Lokasi`](models/value_objects.py) - Informasi lokasi dengan koordinat
+- main.py: FastAPI app bootstrap, main router registration, and database init via lifespan
+- router/router.py: main endpoints under /api/perencanaan
+- router/auth_router.py: /token login endpoint exists in the codebase, but is not currently registered in main.py
 
-### Entities
-- [`HariPerjalanan`](models/entity.py) - Satu hari dalam rencana perjalanan
-- [`Aktivitas`](models/entity.py) - Kegiatan terjadwal dalam satu hari
-- [`Pengeluaran`](models/entity.py) - Pengeluaran uang dalam perjalanan
+### Domain Layer
 
-### Aggregate Root
-- [`RencanaPerjalanan`](models/aggregate_root.py) - Titik masuk utama untuk memodifikasi state, mengelola invariants bisnis
+- models/aggregate_root.py: RencanaPerjalanan aggregate root
+- models/entity.py: Lokasi, HariPerjalanan, Aktivitas, Pengeluaran, TripImage, TripPickupPoint, TripInclude entities
+- models/exception.py: domain exceptions for business invariants
+- models/value_objects.py: supporting value objects
 
-### Business Rules (Invariants)
-1. Total pengeluaran tidak boleh melebihi anggaran
-2. Hari perjalanan dan pengeluaran harus dalam rentang durasi rencana perjalanan
-3. Aktivitas dalam satu hari rencana perjalanan tidak boleh tumpang tindih waktu
-4. Update durasi rencana perjalanan harus mencakup semua hari dan pengeluaran yang sudah ada
+### Application/Infrastructure
 
-## 🚀 Cara Menjalankan Program
+- schema.py: endpoint request schemas (Pydantic)
+- database.py: SQLModel engine, session dependency, and DB schema compatibility validation (non-SQLite)
+- security/security.py: stateless bearer JWT validation (user_id, email, role claims)
 
-### Prasyarat
+## Domain Rules (Invariants)
+
+1. Total expenses cannot exceed trip price/budget.
+2. Trip days and expense dates must stay within the trip duration range.
+3. Activities in the same day must not overlap.
+4. Duration updates must still cover existing trip days and expenses.
+
+## Prerequisites
+
 - Python >= 3.13
-- `uv` package manager
+- uv package manager
 
-### Langkah Instalasi
+## Local Setup
 
-1. **Clone repository**
-   ```bash
-   git clone <repository-url>
-   cd travel_planner
-   ```
+1. Clone repository
 
-2. **Install dependencies**
-   ```bash
-   uv sync
-   ```
-
-3. **Install dev dependencies (untuk testing)**
-   ```bash
-   uv sync --extra dev
-   ```
-
-4. **Setup environment variables**
-   ```bash
-   cp .env.example .env
-   ```
-   
-   Atau generate SECRET_KEY baru:
-   ```bash
-   uv run security/generate_key.py
-   ```
-   
-   Lalu simpan output ke file `.env`:
-   ```
-   SECRET_KEY=hasil_generated_key
-   DATABASE_URL=sqlite:///./local_travel.db
-   ```
-
-## 🔐 Konfigurasi Autentikasi & JWT
-
-Autentikasi menggunakan **JWT** dengan **OAuth2PasswordBearer**.
-
-- **SECRET_KEY**
-  - Disimpan di environment variable `SECRET_KEY`.
-  - Untuk generate key baru:
-    ```bash
-    uv run security/generate_key.py
-    ```
-  - Minimal 32 karakter untuk keamanan
-
-- **Password Hashing**
-  - Menggunakan `passlib` dengan algoritma `bcrypt`.
-  - Versi `bcrypt` dipin di [pyproject.toml](pyproject.toml) agar kompatibel dengan `passlib`.
-  - Helper untuk generate password hash: `uv run security/hash.py`
-
-- **User Dummy (In-Memory)**
-  - Didefinisikan di [`fake_users_db`](security/security.py) dalam [security/security.py](security/security.py).
-  - User yang tersedia:
-    - `username`: **johndoe**, `password`: **rahasia**
-    - `username`: **alice**, `password`: **rahasia2**
-
-Semua endpoint di bawah prefix `/api/perencanaan` membutuhkan **Bearer token** di header:
-
-```http
-Authorization: Bearer <access_token>
+```bash
+git clone <repository-url>
+cd travel_planner
 ```
 
-## 💾 Database
+2. Install runtime dependencies
 
-Proyek ini menggunakan **SQLModel** yang mendukung SQLite dan PostgreSQL:
+```bash
+uv sync
+```
 
-- **Development**: SQLite (default)
-  ```
-  DATABASE_URL=sqlite:///./local_travel.db
-  ```
+3. Install dev/test dependencies
 
-- **Production**: PostgreSQL
-  ```
-  DATABASE_URL=postgresql://user:password@host:port/dbname
-  ```
+```bash
+uv sync --extra dev
+```
 
-Database akan otomatis diinisialisasi saat aplikasi dijalankan (lihat [database.py](database.py)).
+4. Create a .env file
 
-## 💻 Penggunaan
+```bash
+copy .env.example .env
+```
 
-### Menjalankan Server
+Or define it manually:
+
+```env
+SECRET_KEY=your-secret-key-at-least-32-characters
+DATABASE_URL=sqlite:///./local_travel.db
+```
+
+Optional: generate SECRET_KEY:
+
+```bash
+uv run security/generate_key.py
+```
+
+## Run the Application
 
 ```bash
 uv run main.py
 ```
 
-atau
+Server runs at:
 
-```bash
-uv run uvicorn main:app --reload
-```
+- http://127.0.0.1:8005
+- Swagger: http://127.0.0.1:8005/docs
+- ReDoc: http://127.0.0.1:8005/redoc
 
-Server akan berjalan di `http://127.0.0.1:8000`
+Notes:
 
-### Dokumentasi API
+- If you run uvicorn directly without --port, the default uvicorn port is 8000.
+- The main() entry point in main.py runs the app on port 8005.
 
-Setelah server berjalan, akses dokumentasi interaktif:
-- **Swagger UI**: `http://127.0.0.1:8000/docs`
-- **ReDoc**: `http://127.0.0.1:8000/redoc`
+## JWT Authentication (Current State)
 
-### Login & Mendapatkan Token di Swagger UI
+- Many endpoints in the main router are protected with the get_current_user dependency.
+- The token must be a valid Bearer JWT with at least the user_id claim.
+- The /api/auth/token login endpoint exists in router/auth_router.py, but is not currently registered in main.py.
 
-1. Buka `http://127.0.0.1:8000/docs`.
-2. Klik tombol **Authorize** (ikon gembok).
-3. Isi:
-   - **Username**: `johndoe`
-   - **Password**: `rahasia`
-4. Klik **Authorize** lalu **Close**.
-5. Setelah itu, semua request ke endpoint `/api/perencanaan/...` dari Swagger akan otomatis menyertakan token.
-
-Response:
-```json
-{
-  "access_token": "<jwt_token>",
-  "token_type": "bearer"
-}
-```
-
-Gunakan nilai `access_token` di header `Authorization` untuk memanggil endpoint lain.
-
-## 📡 API Endpoints
-
-> **Catatan**: Semua endpoint di bawah `/api/perencanaan` memerlukan header `Authorization: Bearer <access_token>`.
-
-### Autentikasi
-
-| Method | Endpoint             | Deskripsi                       |
-|--------|----------------------|---------------------------------|
-| POST   | `/api/auth/token`   | Login dan mendapatkan JWT token |
-
-### Rencana Perjalanan
-
-| Method | Endpoint                                     | Deskripsi                       |
-|--------|----------------------------------------------|---------------------------------|
-| POST   | `/api/perencanaan/`                         | Membuat rencana perjalanan baru |
-| GET    | `/api/perencanaan/{rencana_id}`             | Mendapatkan rencana perjalanan  |
-| PUT    | `/api/perencanaan/{rencana_id}/anggaran`    | Update anggaran                 |
-| PUT    | `/api/perencanaan/{rencana_id}/durasi`      | Update durasi                   |
-
-### Hari Perjalanan
-
-| Method | Endpoint                                        | Deskripsi                   |
-|--------|-------------------------------------------------|-----------------------------|
-| POST   | `/api/perencanaan/{rencana_id}/hari`           | Menambahkan hari perjalanan |
-| DELETE | `/api/perencanaan/{rencana_id}/hari/{tanggal}` | Menghapus hari perjalanan   |
-
-### Aktivitas
-
-| Method | Endpoint                                                      | Deskripsi                     |
-|--------|---------------------------------------------------------------|-------------------------------|
-| POST   | `/api/perencanaan/{rencana_id}/hari/{tanggal}/aktivitas`    | Menambahkan aktivitas ke hari |
-
-### Pengeluaran
-
-| Method | Endpoint                                                       | Deskripsi             |
-|--------|----------------------------------------------------------------|-----------------------|
-| POST   | `/api/perencanaan/{rencana_id}/pengeluaran`                   | Menambahkan pengeluaran|
-| DELETE | `/api/perencanaan/{rencana_id}/pengeluaran/{id_pengeluaran}` | Menghapus pengeluaran |
-
-## 📝 Contoh Request
-
-> Pastikan sudah memiliki `access_token` dari `/api/auth/token` dan sertakan header:
-> `Authorization: Bearer <access_token>`
-
-### Login
+Authentication header:
 
 ```http
-POST /api/auth/token
-Content-Type: application/x-www-form-urlencoded
+Authorization: Bearer <jwt_token>
 ```
 
-```
-username=johndoe&password=rahasia
-```
+## API Endpoint Summary
 
-### Membuat Rencana Perjalanan
+Main prefix: /api/perencanaan
 
-```http
-POST /api/perencanaan/
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
+### Locations
+
+| Method | Endpoint            | Auth | Description     |
+| ------ | ------------------- | ---- | --------------- |
+| POST   | /lokasi/            | Yes  | Create location |
+| GET    | /lokasi/            | Yes  | List locations  |
+| GET    | /lokasi/{lokasi_id} | Yes  | Location detail |
+
+### Travel Plan / Trip
+
+| Method | Endpoint               | Auth | Description                           |
+| ------ | ---------------------- | ---- | ------------------------------------- |
+| POST   | /                      | Yes  | Create travel plan                    |
+| POST   | /bulk-create           | Yes  | Create full trip (atomic transaction) |
+| GET    | /                      | Yes  | List current user's plans             |
+| GET    | /all                   | No   | List all plans                        |
+| GET    | /{rencana_id}          | Yes  | Plan detail (ownership check)         |
+| GET    | /trips/latest          | Yes  | Current user's latest trip            |
+| GET    | /trips/all             | No   | Trip list for frontend usage          |
+| GET    | /trips/{trip_id}       | No   | Normalized trip detail                |
+| PUT    | /{rencana_id}/anggaran | Yes  | Update budget                         |
+| PUT    | /{rencana_id}/durasi   | Yes  | Update duration                       |
+| PUT    | /trips/{trip_id}       | No   | Update trip (frontend format)         |
+
+### Trip Slots
+
+| Method | Endpoint                       | Auth | Description                                  |
+| ------ | ------------------------------ | ---- | -------------------------------------------- |
+| POST   | /trips/{trip_id}/reserve-slots | No   | Decrease slot_tersedia if enough slots exist |
+| POST   | /trips/{trip_id}/release-slots | No   | Increase slot_tersedia (up to slot max)      |
+| POST   | /trips/{trip_id}/sync-slots    | No   | Sync slot_tersedia from participant_count    |
+
+### Trip Images
+
+| Method | Endpoint                        | Auth | Description  |
+| ------ | ------------------------------- | ---- | ------------ |
+| POST   | /{rencana_id}/images            | Yes  | Add image    |
+| GET    | /{rencana_id}/images            | Yes  | List images  |
+| DELETE | /{rencana_id}/images/{image_id} | Yes  | Delete image |
+
+### Trip Pickup Points
+
+| Method | Endpoint                                | Auth | Description                   |
+| ------ | --------------------------------------- | ---- | ----------------------------- |
+| POST   | /{rencana_id}/pickup-points             | Yes  | Add pickup point              |
+| GET    | /trip-pickup-points?plan_id=...         | No   | List pickup points by plan_id |
+| GET    | /pickup_points?trip_id=...              | No   | List pickup points by trip_id |
+| GET    | /{rencana_id}/pickup-points             | Yes  | List pickup points for a plan |
+| DELETE | /{rencana_id}/pickup-points/{pickup_id} | Yes  | Delete pickup point           |
+
+### Trip Includes
+
+| Method | Endpoint                            | Auth | Description         |
+| ------ | ----------------------------------- | ---- | ------------------- |
+| POST   | /{rencana_id}/includes              | Yes  | Add include item    |
+| GET    | /{rencana_id}/includes              | Yes  | List include items  |
+| DELETE | /{rencana_id}/includes/{include_id} | Yes  | Delete include item |
+
+### Days, Activities, Expenses, Statistics
+
+| Method | Endpoint                                   | Auth | Description     |
+| ------ | ------------------------------------------ | ---- | --------------- |
+| POST   | /{rencana_id}/hari                         | Yes  | Add trip day    |
+| DELETE | /{rencana_id}/hari/{tanggal}               | Yes  | Delete trip day |
+| POST   | /{rencana_id}/hari/{tanggal}/aktivitas     | Yes  | Add activity    |
+| GET    | /{rencana_id}/hari/{tanggal}/aktivitas     | Yes  | List activities |
+| POST   | /{rencana_id}/pengeluaran                  | Yes  | Add expense     |
+| DELETE | /{rencana_id}/pengeluaran/{id_pengeluaran} | Yes  | Delete expense  |
+| GET    | /{rencana_id}/statistik                    | Yes  | Trip statistics |
+
+## Important Payload Examples
+
+### Create travel plan
 
 ```json
 {
-  "nama": "Liburan ke Bali",
+  "nama": "Liburan Bali 5D4N",
+  "deskripsi": "Trip keluarga",
   "durasi": {
-    "tanggalMulai": "2024-12-01",
-    "tanggalSelesai": "2024-12-07"
+    "tanggalMulai": "2026-04-01",
+    "tanggalSelesai": "2026-04-05"
   },
   "anggaran": {
-    "jumlah": 5000000,
-    "mata_uang": "IDR"
-  }
-}
-```
-
-### Menambahkan Hari Perjalanan
-
-```http
-POST /api/perencanaan/{rencana_id}/hari
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
-
-```json
-{
-  "tanggal": "2024-12-03"
-}
-```
-
-### Menambahkan Pengeluaran
-
-```http
-POST /api/perencanaan/{rencana_id}/pengeluaran
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
-
-```json
-{
-  "deskripsi": "Hotel",
-  "biaya": {
-    "jumlah": 1000000.0,
+    "jumlah": 3500000,
     "mata_uang": "IDR"
   },
-  "tanggalPengeluaran": "2024-12-02"
+  "slot": 20,
+  "provinsi": "Bali",
+  "negara": "Indonesia",
+  "destination_type": "Beach",
+  "jumlah_hari": 5,
+  "jumlah_malam": 4
 }
 ```
 
-### Menambahkan Aktivitas
-
-```http
-POST /api/perencanaan/{rencana_id}/hari/2024-12-01/aktivitas
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
+### Reserve slot
 
 ```json
 {
-  "waktuMulai": "09:00:00",
-  "waktuSelesai": "12:00:00",
-  "lokasi": {
-    "namaLokasi": "Pantai Kuta",
-    "alamat": "Kuta, Bali",
-    "latitude": -8.7224,
-    "longitude": 115.1707
-  },
-  "deskripsi": "Berjemur di pantai"
+  "participant_count": 2
 }
 ```
 
-## 🧪 Testing
+### Add daily activity
 
-### Menjalankan Semua Tests
+```json
+{
+  "waktu_mulai": "08:00:00",
+  "duration": 2,
+  "deskripsi": "Snorkeling",
+  "id_lokasi": "4df5a657-2db9-4f3b-9f9f-bfd81c4788e1"
+}
+```
+
+## Testing
+
+Run all tests:
 
 ```bash
 uv run pytest
 ```
 
-### Menjalankan Test dengan Verbose
-
-```bash
-uv run pytest -v
-```
-
-### Menjalankan Test dengan Coverage
+Coverage report:
 
 ```bash
 uv run pytest --cov=. --cov-report=html
 ```
 
-Report akan tersimpan di folder `htmlcov/`.
-
-### Menjalankan Test File Tertentu
+Verbose:
 
 ```bash
-uv run pytest tests/test_create.py
+uv run pytest -v
 ```
 
-### Menjalankan Test Spesifik
-
-```bash
-uv run pytest tests/test_create.py::test_create_rencana_perjalanan_success
-```
-
-### Test Categories
-
-- **Unit Tests**: Test domain logic ([tests/test_domain.py](tests/test_domain.py))
-- **Integration Tests**: Test API endpoints
-  - [tests/test_create.py](tests/test_create.py) - CREATE operations
-  - [tests/test_get.py](tests/test_get.py) - READ operations
-  - [tests/test_update.py](tests/test_update.py) - UPDATE operations
-  - [tests/test_delete.py](tests/test_delete.py) - DELETE operations
-- **Security Tests**: Test authentication ([tests/test_security.py](tests/test_security.py))
-- **Database Tests**: Test database functions ([tests/test_init_db.py](tests/test_init_db.py))
-
-## 📁 Struktur Proyek
+## Project Structure
 
 ```text
 travel_planner/
-├── .github/
-│   └── workflows/          # CI/CD workflows
-├── models/                 # Domain models (DDD)
-│   ├── __init__.py
-│   ├── aggregate_root.py   # Aggregate Root: RencanaPerjalanan
-│   ├── entity.py           # Entities: HariPerjalanan, Aktivitas, Pengeluaran
-│   ├── value_objects.py    # Value Objects: Uang, Durasi, Lokasi
-│   └── exception.py        # Business exceptions
-├── router/                 # API routing
-│   ├── __init__.py
-│   ├── router.py           # Main API endpoints
-│   └── auth_router.py      # Authentication endpoints
-├── security/               # Security & authentication
-│   ├── __init__.py
-│   ├── security.py         # JWT & password hashing
-│   ├── generate_key.py     # Script untuk generate SECRET_KEY
-│   └── hash.py             # Script helper untuk hash password
-├── tests/                  # Test files
-│   ├── conftest.py         # Pytest fixtures
-│   ├── test_auth_router.py # Auth endpoint tests
-│   ├── test_create.py      # CREATE endpoint tests
-│   ├── test_delete.py      # DELETE endpoint tests
-│   ├── test_domain.py      # Domain logic unit tests
-│   ├── test_get.py         # GET endpoint tests
-│   ├── test_update.py      # UPDATE endpoint tests
-│   ├── test_security.py    # Security function tests
-│   ├── test_init_db.py     # Database tests
-│   └── utils.py            # Test utilities
-├── database.py             # Database configuration & session
-├── main.py                 # FastAPI application entry point
-├── schema.py               # Pydantic schemas untuk request/response
-├── pyproject.toml          # Project dependencies & config
-├── .env.example            # Example environment variables
-├── .gitignore              # Git ignore rules
-└── README.md               # Project documentation
+├── .github/workflows/main.yml
+├── models/
+│   ├── aggregate_root.py
+│   ├── entity.py
+│   ├── exception.py
+│   └── value_objects.py
+├── router/
+│   ├── router.py
+│   └── auth_router.py
+├── security/
+│   ├── security.py
+│   ├── generate_key.py
+│   └── hash.py
+├── tests/
+├── database.py
+├── main.py
+├── schema.py
+├── pyproject.toml
+└── README.md
 ```
 
-## 🛠️ Tech Stack
+## Continuous Integration
 
-- **uv** - Python package manager
-- **FastAPI** - Web framework modern untuk Python
-- **Uvicorn** - ASGI server
-- **SQLModel** - SQL database ORM dengan Pydantic models
-- **Pydantic** - Data validation menggunakan Python type annotations
-- **pytest** - Python testing framework
-- **pytest-cov** - Coverage plugin untuk pytest
-- **passlib[bcrypt]** - Password hashing
-- **python-jose[cryptography]** - JWT handling
-- **python-dotenv** - Environment variable management
-- **httpx** - HTTP client untuk testing
-
-## 🔄 CI/CD
-
-Proyek ini menggunakan GitHub Actions untuk:
-- Menjalankan tests otomatis pada setiap push/PR
-- Mengecek code coverage
-- Validasi di multiple Python versions
-
-Lihat konfigurasi di [.github/workflows/](.github/workflows/).
-
-## 📝 Environment Variables
-
-Buat file `.env` di root directory:
-
-```env
-SECRET_KEY=your-secret-key-at-least-32-characters-long
-DATABASE_URL=sqlite:///./local_travel.db  # atau PostgreSQL URL
-```
-
-Contoh untuk PostgreSQL:
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/travel_planner
-```
-
-## 🚀 Deployment: Railway
-
-
-### Deployment Steps
-
-#### Via Railway Dashboard
-
-1. Klik **New Project** di Railway dashboard
-2. Pilih **Deploy from GitHub repo**
-3. Pilih repository `travel_planner`
-4. Railway akan otomatis detect Python project dan build
-
-### Konfigurasi Environment Variables
-
-Di Railway dashboard, ditambahkan environment variables berikut di **Variables** tab:
-
-```env
-SECRET_KEY=your-production-secret-key-min-32-chars
-DATABASE_URL=${{Postgres.DATABASE_URL}}  # Otomatis jika pakai Railway Postgres
-```
-
-### Setup Database PostgreSQL
-
-1. Di Railway project, klik **New** → **Database** → **Add PostgreSQL**
-2. Railway secara otomatis membuat database dan set `DATABASE_URL`
-3. Variabel `${{Postgres.DATABASE_URL}}` akan otomatis ter-inject ke aplikasi
-
-
-### Domain & Akses
-
-- Railway akan generate public domain otomatis: `https://travelplanner-production-cada.up.railway.app`
-- Akses Swagger UI: `https://travelplanner-production-cada.up.railway.app/docs`
-- Akses ReDoc: `https://travelplanner-production-cada.up.railway.app/redoc`
-
-
-## 👥 Author
-
-**dzakyatha** - [GitHub Profile](https://github.com/dzakyatha)
+GitHub Actions workflow is defined in `.github/workflows/main.yml`
